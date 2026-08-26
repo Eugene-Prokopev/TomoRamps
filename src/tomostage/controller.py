@@ -1,0 +1,152 @@
+"""G-code контроллер предметного стола томографа.
+
+Связь с Arduino Mega (Marlin 2.1.x) по последовательному порту.
+Оси проекта: X, Y — точные (микровинты), Z — грубая (направляющая 1 м),
+I — наклон, J — вращение (слоты E0/E1). DC-мотор: M106/M107 + M42.
+"""
+from __future__ import annotations
+
+import re
+import threading
+from typing import Callable, Dict, Optional
+
+AXES = ("X", "Y", "Z", "I", "J")
+DEFAULT_BAUD = 250000
+
+
+class TomoStageError(RuntimeError):
+    """Ошибка связи или отказа прошивки."""
+
+
+class GCodeController:
+    """Мини-клиент G-code: отправка команд, парсинг ответов, перемещения."""
+
+    def __init__(self, port: str, baudrate: int = DEFAULT_BAUD,
+                 timeout: float = 3.0,
+                 serial_factory: Optional[Callable] = None) -> None:
+        self.port = port
+        self.baudrate = baudrate
+        self.timeout = timeout
+        self._serial = None
+        self._lock = threading.Lock()
+        self._factory = serial_factory
+
+    # --- соединение -------------------------------------------------
+    def connect(self) -> None:
+        if self._serial is not None:
+            raise TomoStageError("Уже подключено")
+        ser = self._factory(self.port, self.baudrate, self.timeout) \
+            if self._factory else self._open_pyserial()
+        try:
+            ser.open()
+        except Exception as exc:  # noqa: BLE001
+            raise TomoStageError(f"Не удалось открыть {self.port}: {exc}") from exc
+        self._serial = ser
+        self.send("")            # будим плату (Mega перезагружается по DTR)
+        self.send("M110 N0")     # сброс нумерации строк
+        self.send("G90")         # абсолютные координаты
+        self.send("M82")         # экструдер в абсолют (для единообразия)
+
+    def _open_pyserial(self):
+        import serial  # локальный импорт: тестам pyserial не нужен
+        return serial.Serial()
+
+    def close(self) -> None:
+        if self._serial is not None:
+            try:
+                self._serial.close()
+            finally:
+                self._serial = None
+
+    @property
+    def connected(self) -> bool:
+        return self._serial is not None
+
+    def __enter__(self) -> "GCodeController":
+        self.connect()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    # --- обмен ------------------------------------------------------
+    def send(self, command: str, wait_ok: bool = True) -> list[str]:
+        """Отправить команду, вернуть список информационных строк ответа."""
+        if self._serial is None:
+            raise TomoStageError("Нет соединения")
+        with self._lock:
+            self._serial.reset_input_buffer()
+            self._serial.write((command.strip() + "\n").encode("ascii"))
+            if not wait_ok:
+                return []
+            info: list[str] = []
+            deadline = self.timeout * 4
+            waited = 0.0
+            step = 0.02
+            while waited < deadline:
+                raw = self._serial.readline()
+                if not raw:
+                    waited += step
+                    continue
+                line = raw.decode("ascii", errors="replace").strip()
+                waited = 0.0
+                if not line or line == "ok":
+                    if line == "ok":
+                        return info
+                    continue
+                if line.startswith("Error:") or line.startswith("echo:"):
+                    if line.startswith("Error:"):
+                        info.append(line)
+                        raise TomoStageError(f"Плата: {line}")
+                    continue
+                info.append(line)
+            raise TomoStageError(f"Таймаут ответа на '{command}'")
+
+    # --- команды уровня стола ---------------------------------------
+    def get_position(self) -> Dict[str, float]:
+        """M114 -> {'X': .., 'Y': .., 'Z': .., 'I': .., 'J': ..}."""
+        resp = self.send("M114")
+        text = " ".join(resp)
+        out: Dict[str, float] = {}
+        for ax in AXES:
+            m = re.search(rf"\b{ax}:(-?\d+\.?\d*)", text)
+            if m:
+                out[ax] = float(m.group(1))
+        if len(out) != len(AXES):
+            raise TomoStageError(f"Не распарсены координаты: {text!r}")
+        return out
+
+    def move(self, axis: str, distance: float, feed: Optional[int] = None) -> None:
+        """Относительное перемещение по одной оси."""
+        if axis not in AXES:
+            raise ValueError(f"Ось должна быть из {AXES}, получено {axis!r}")
+        cmd = f"G91 G0 {axis}{distance:.4f}"
+        if feed:
+            cmd += f" F{int(feed)}"
+        self.send(cmd)
+        self.send("G90")  # вернулись в абсолют
+
+    def home(self, axes: str = "XYZIJ") -> None:
+        bad = set(axes.upper()) - set(AXES)
+        if bad:
+            raise ValueError(f"Неизвестные оси: {bad}")
+        self.send("G28 " + " ".join(axes.upper()))
+
+    def emergency_stop(self) -> None:
+        self.send("M112", wait_ok=False)
+
+    def dc_speed(self, value_0_255: int) -> None:
+        """Скорость DC-мотора (ШИМ на D9/ENA L298N). Направление задаётся отдельно."""
+        v = max(0, min(255, int(value_0_255)))
+        self.send(f"M106 S{v}" if v else "M107")
+
+    def dc_direction(self, forward: bool) -> None:
+        """Направление DC-мотора: IN1=D11, IN2=D6."""
+        self.send(f"M42 P11 S{1 if forward else 0}")
+        self.send(f"M42 P6 S{0 if forward else 1}")
+
+    def endstops(self) -> list[str]:
+        return self.send("M119")
+
+    def firmware_info(self) -> str:
+        return " ".join(self.send("M115"))
