@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.coverage
+
+# Arduino / PlatformIO / сборка
+.pio/
+*.hex
+*.elf
+firmware/Marlin/  # пока не храним всю прошивку, только наши конфиги и патчи
+
+# IDE
+.vscode/
+.idea/
+
+# ОС
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Логи и временные файлы
+*.log
+*.tmp
