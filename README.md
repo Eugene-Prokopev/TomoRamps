@@ -14,7 +14,26 @@ G-code по USB), приложение оператора — Python (pyserial +
 | Концевики | частично установлены (раскладка уточняется) |
 | Питание | 12 В DC |
 
-Распиновка и команды проверки: [docs/ramps16_pinmap.md](docs/ramps16_pinmap.md)
+## Документация по подключениям
+
+- **[docs/index.html](docs/index.html)** — полный визуальный справочник в одном файле:
+  официальная диаграмма подключения BTT RAMPS 1.6, принципиальные схемы, карта шёлка,
+  шпаргалка пинов на русском (открывается в браузере без интернета).
+- [docs/ramps16_pinmap.md](docs/ramps16_pinmap.md) — таблицы «разъём → пин Mega» и команды проверки (`M119`, `M42`, `M280`).
+- `docs/pinout/` — исходные материалы:
+
+| Файл | Что это |
+|---|---|
+| `btt_ramps16_wiring_diagram.jpg` | Официальная диаграмма подключения RAMPS 1.6 (BIGTREETECH) |
+| `btt_schematic.pdf` / `btt_schematic_plus.pdf` | Принципиальные схемы платы |
+| `btt_silkscreen_2d.pdf` | 2D-карта шёлка (надписей) платы |
+| `rampswire14.svg` | Классическая схема RepRap (RAMPS 1.4 ≡ 1.6 электрически) |
+| `osoyoo_schematic2.png` | Схема подключения периферии |
+| `mega_connectors.png` / `ramps16_connectors.jpg` | Раскладка разъёмов Mega и RAMPS |
+| `btt_motherboard.jpg` | Фото платы BTT |
+
+> 🌐 Онлайн-версия справочника (после включения GitHub Pages):
+> https://eugene-prokopev.github.io/TomoRamps/
 
 ## Структура репозитория
 
@@ -25,7 +44,9 @@ G-code по USB), приложение оператора — Python (pyserial +
 ├── scripts/check.py     # автопроверка цели: компиляция+тесты одним запуском
 ├── firmware/            # конфиги Marlin (Configuration.h и патчи)
 ├── docs/
+│   ├── index.html         # визуальный справочник распиновки (GitHub Pages)
 │   ├── ramps16_pinmap.md  # распиновка RAMPS 1.6 ↔ Mega
+│   ├── pinout/            # схемы, диаграммы, фото платы
 │   └── goals/             # GOAL-*.md и VERDICT-*.md (режим «цель → ревью»)
 ├── requirements.txt
 └── README.md
