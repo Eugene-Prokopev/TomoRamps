@@ -70,6 +70,14 @@ class MainWindow(QMainWindow):
         self.btn_m119 = QPushButton("Проверить концевики (M119)")
         self.btn_m119.clicked.connect(self.read_endstops)
         lay.addWidget(self.btn_m119)
+        motor_row = QHBoxLayout()
+        self.btn_m17 = QPushButton("Моторы ON (M17)")
+        self.btn_m18 = QPushButton("Моторы OFF (M18)")
+        self.btn_m17.clicked.connect(self.motors_on)
+        self.btn_m18.clicked.connect(self.motors_off)
+        motor_row.addWidget(self.btn_m17)
+        motor_row.addWidget(self.btn_m18)
+        lay.addLayout(motor_row)
         estop = QPushButton("АВАР. СТОП (M112)")
         estop.setStyleSheet("background:#c0392b; color:white; font-weight:bold")
         estop.clicked.connect(self.estop)
@@ -169,6 +177,26 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Подключено: {port}")
         self.read_pos()
         self.read_endstops()
+
+    def motors_on(self) -> None:
+        if not (self.stage and self.stage.connected):
+            self.statusBar().showMessage("Сначала подключите плату")
+            return
+        try:
+            self.stage.motors_on()
+            self.statusBar().showMessage("M17: драйверы включены; проверьте удерживающий момент X")
+        except TomoStageError as exc:
+            self.statusBar().showMessage(f"Ошибка M17: {exc}")
+
+    def motors_off(self) -> None:
+        if not (self.stage and self.stage.connected):
+            self.statusBar().showMessage("Сначала подключите плату")
+            return
+        try:
+            self.stage.motors_off()
+            self.statusBar().showMessage("M18: драйверы отключены")
+        except TomoStageError as exc:
+            self.statusBar().showMessage(f"Ошибка M18: {exc}")
 
     def jog(self, axis: str, direction: int) -> None:
         if not (self.stage and self.stage.connected):

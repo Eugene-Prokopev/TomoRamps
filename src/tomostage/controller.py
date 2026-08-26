@@ -141,6 +141,14 @@ class GCodeController:
             raise ValueError(f"Неизвестные оси: {bad}")
         self.send("G28 " + " ".join(axes.upper()))
 
+    def motors_on(self) -> None:
+        """Включить силовые выходы шаговых драйверов."""
+        self.send("M17")
+
+    def motors_off(self) -> None:
+        """Отключить силовые выходы шаговых драйверов."""
+        self.send("M18")
+
     def emergency_stop(self) -> None:
         self.send("M112", wait_ok=False)
 
