@@ -91,29 +91,15 @@ Compiling .pio\build\mega2560\src\src\module\stepper.cpp.o
 Compiling .pio\build\mega2560\src\src\module\stepper\indirection.cpp.o
 Compiling .pio\build\mega2560\src\src\module\temperature.cpp.o
 Compiling .pio\build\mega2560\src\src\module\tool_change.cpp.o
-Compiling .pio\build\mega2560\FrameworkArduino\hooks.c.o
-Compiling .pio\build\mega2560\FrameworkArduino\main.cpp.o
-Compiling .pio\build\mega2560\FrameworkArduino\new.cpp.o
-Compiling .pio\build\mega2560\FrameworkArduino\wiring.c.o
-Compiling .pio\build\mega2560\FrameworkArduino\wiring_analog.c.o
-Compiling .pio\build\mega2560\FrameworkArduino\wiring_digital.c.o
-Compiling .pio\build\mega2560\FrameworkArduino\wiring_pulse.S.o
-Compiling .pio\build\mega2560\FrameworkArduino\wiring_pulse.c.o
-Compiling .pio\build\mega2560\FrameworkArduino\wiring_shift.c.o
-Archiving .pio\build\mega2560\libFrameworkArduino.a
 Linking .pio\build\mega2560\firmware.elf
 Checking size .pio\build\mega2560\firmware.elf
 Advanced Memory Usage is available via "PlatformIO Home > Project Inspect"
 RAM:   [===       ]  32.8% (used 2687 bytes from 8192 bytes)
-Flash: [==        ]  20.2% (used 51276 bytes from 253952 bytes)
+Flash: [==        ]  20.2% (used 51300 bytes from 253952 bytes)
 Building .pio\build\mega2560\firmware.hex
-========================= [SUCCESS] Took 8.55 seconds =========================
+========================= [SUCCESS] Took 7.39 seconds =========================
 
 Environment    Status    Duration
 -------------  --------  ------------
-mega2560       SUCCESS   00:00:08.551
-========================= 1 succeeded in 00:00:08.551 =========================
-
-********************************************************************************
-We found 54.36MB of unnecessary PlatformIO system data (temporary files, unnecessary packages, etc.).
-Use `pio system prune --dry-run` to list them or `pio system prune` to save disk space.
+mega2560       SUCCESS   00:00:07.391
+========================= 1 succeeded in 00:00:07.391 =========================
