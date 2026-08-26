@@ -24,7 +24,7 @@ URL = f"https://github.com/MarlinFirmware/Marlin/archive/refs/tags/{MARLIN_REF}.
 
 # (регулярка, замена, описание). Флаг APPEND = добавить в конец, если не найдено.
 PATCHES_H = [
-    (r"^#define MOTHERBOARD\s+\S+",
+    (r"^\s*//?\s*#define MOTHERBOARD\s+\S+",
      "#define MOTHERBOARD BOARD_RAMPS_14_EFB",
      "Плата: RAMPS 1.6 электрически = 1.4 (EFB), пины идентичны"),
     (r"^#define SERIAL_PORT\s+-?\d+",
@@ -63,7 +63,7 @@ PATCHES_H = [
     (r"^#define DEFAULT_TRAVEL_ACCELERATION\s+\d+",
      "#define DEFAULT_TRAVEL_ACCELERATION 800",
      "Ускорение холостых ходов"),
-    (r"^//?\s*#define EEPROM_SETTINGS",
+    (r"^\s*/{0,2}\s*#define EEPROM_SETTINGS.*$",
      "#define EEPROM_SETTINGS",
      "EEPROM: M500 сохранит откалиброванные шаги/мм"),
     (r"^//?\s*#define CUSTOM_MACHINE_NAME.*",
@@ -97,6 +97,7 @@ def download_and_unpack() -> None:
 
 def apply_patches() -> int:
     errors, applied, skipped = [], 0, 0
+    patched = {}
     for fname in ("Configuration.h",):
         path = MARLIN_DIR / "Marlin" / fname
         text = original = path.read_text(encoding="utf-8")
@@ -109,8 +110,8 @@ def apply_patches() -> int:
                 applied += 1
                 print(f"  [patch] {desc}")
                 continue
-            # уже применено ранее?
-            if re.search("^" + re.escape(repl) + r"\s*$", text, flags=re.M):
+            # уже применено ранее? (отступ и хвостовой комментарий не важны)
+            if re.search(r"^\s*" + re.escape(repl) + r"(?:\s|$)", text, flags=re.M):
                 skipped += 1
                 print(f"  [skip ] {desc} (уже применено)")
                 continue
@@ -120,13 +121,15 @@ def apply_patches() -> int:
                 print(f"  [add  ] {desc} (добавлено в конец файла)")
                 continue
             errors.append(f"{fname}: не найдено '{pattern}' ({desc})")
-        if text != original:
-            path.write_text(text, encoding="utf-8", newline="\n")
+        patched[path] = (text, original)
     if errors:
-        print("\n[ОШИБКИ] Патчи не применились:")
+        print("\n[ОШИБКИ] Патчи не применились (файл НЕ изменён):")
         for e in errors:
             print("  -", e)
         return 1
+    for path, (text, original) in patched.items():
+        if text != original:
+            path.write_text(text, encoding="utf-8", newline="\n")
     print(f"\n[ok] Патчей применено/проверено: {applied + skipped}")
     return 0
 
