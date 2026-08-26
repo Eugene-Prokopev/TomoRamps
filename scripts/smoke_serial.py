@@ -4,8 +4,13 @@
 """
 import argparse
 import sys
+from pathlib import Path
 
-from tomostage.controller import GCodeController, TomoStageError
+# Позволяет запускать файл напрямую из scripts\\ без установки пакета:
+# .venv\\Scripts\\python.exe scripts\\smoke_serial.py --port COM11
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from tomostage.controller import GCodeController, TomoStageError  # noqa: E402
 
 
 def main() -> int:

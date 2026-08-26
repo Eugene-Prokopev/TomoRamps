@@ -1,9 +1,0 @@
-Marlin\src\inc\Warnings.cpp:67:4: warning: #warning "Your Configuration provides no method to acquire user feedback!" [-Wcpp]
-   #warning "Your Configuration provides no method to acquire user feedback!"
-    ^~~~~~~
-Marlin\src\inc\Warnings.cpp:373:6: warning: #warning "Note: Auto-assigned I STEP/DIR/ENABLE_PINs to unused En_STEP/DIR/ENABLE_PINs. (Define NO_AUTO_ASSIGN_WARNING to suppress this warning.)" [-Wcpp]
-     #warning "Note: Auto-assigned I STEP/DIR/ENABLE_PINs to unused En_STEP/DIR/ENABLE_PINs. (Define NO_AUTO_ASSIGN_WARNING to suppress this warning.)"
-      ^~~~~~~
-Marlin\src\inc\Warnings.cpp:431:6: warning: #warning "Note: Auto-assigned J STEP/DIR/ENABLE_PINs to unused En_STEP/DIR/ENABLE_PINs. (Define NO_AUTO_ASSIGN_WARNING to suppress this warning.)" [-Wcpp]
-     #warning "Note: Auto-assigned J STEP/DIR/ENABLE_PINs to unused En_STEP/DIR/ENABLE_PINs. (Define NO_AUTO_ASSIGN_WARNING to suppress this warning.)"
-      ^~~~~~~

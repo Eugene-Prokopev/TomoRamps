@@ -39,7 +39,7 @@ class FakeSerial:
         if cmd.startswith("M110") or cmd.split()[0] in ("G90", "G91", "M82", "M83"):
             return ["ok"]
         if cmd.startswith("M114"):
-            return ["X:1.50 Y:-2.25 Z:300.00 I:12.0 J:45.5 E:0.00 Count X:600 Y:-900 Z:12000", "ok"]
+            return ["X:1.50 Y:-2.25 Z:300.00 A:12.0 B:45.5 E:0.00 Count X:600 Y:-900 Z:12000", "ok"]
         if cmd.startswith("M115"):
             return ["FIRMWARE_NAME:Marlin 2.1.2 SOURCE_CODE_URL:github.com/MarlinFirmware/Marlin "
                     "MACHINE_TYPE:TomoRamps EXTRUDER_COUNT:0", "ok"]
@@ -71,7 +71,7 @@ def test_connect_sends_init_sequence():
 def test_position_parsing_all_five_axes():
     with make_ctrl() as c:
         pos = c.get_position()
-    assert pos == {"X": 1.5, "Y": -2.25, "Z": 300.0, "I": 12.0, "J": 45.5}
+    assert pos == {"X": 1.5, "Y": -2.25, "Z": 300.0, "A": 12.0, "B": 45.5}
 
 
 def test_relative_move_returns_to_absolute_mode():
@@ -90,8 +90,8 @@ def test_move_rejects_unknown_axis():
 
 def test_home_builds_g28_line():
     with make_ctrl() as c:
-        c.home("XI")
-        assert "G28 X I" in c._serial.written
+        c.home("XA")
+        assert "G28 X A" in c._serial.written
 
 
 def test_dc_speed_and_direction_pins():

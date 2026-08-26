@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from typing import Callable, Dict, Optional
 
-AXES = ("X", "Y", "Z", "I", "J")
+AXES = ("X", "Y", "Z", "A", "B")
 DEFAULT_BAUD = 250000
 
 
@@ -42,14 +43,22 @@ class GCodeController:
         except Exception as exc:  # noqa: BLE001
             raise TomoStageError(f"Не удалось открыть {self.port}: {exc}") from exc
         self._serial = ser
-        self.send("")            # будим плату (Mega перезагружается по DTR)
+        # Открытие USB-порта обычно вызывает reset Mega. Даём Marlin
+        # завершить запуск и очищаем стартовый текст перед G-code.
+        time.sleep(2.0)
+        self._serial.reset_input_buffer()
         self.send("M110 N0")     # сброс нумерации строк
         self.send("G90")         # абсолютные координаты
         self.send("M82")         # экструдер в абсолют (для единообразия)
 
     def _open_pyserial(self):
         import serial  # локальный импорт: тестам pyserial не нужен
-        return serial.Serial()
+        # Создаём закрытый объект с настроенным COM-портом, затем connect()
+        # вызывает open(). Serial() без port приводил к ошибке "Port must be configured".
+        ser = serial.Serial(port=None, baudrate=self.baudrate,
+                            timeout=self.timeout)
+        ser.port = self.port
+        return ser
 
     def close(self) -> None:
         if self._serial is not None:
@@ -126,7 +135,7 @@ class GCodeController:
         self.send(cmd)
         self.send("G90")  # вернулись в абсолют
 
-    def home(self, axes: str = "XYZIJ") -> None:
+    def home(self, axes: str = "XYZAB") -> None:
         bad = set(axes.upper()) - set(AXES)
         if bad:
             raise ValueError(f"Неизвестные оси: {bad}")
