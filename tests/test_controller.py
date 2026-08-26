@@ -48,7 +48,7 @@ class FakeSerial:
                     "y_min: open", "y_max: open", "z_min: open", "z_max: open", "ok"]
         if cmd.startswith("G28"):
             return ["ok"]
-        if cmd.startswith("G0"):
+        if cmd.startswith("G0") or cmd.startswith("G1"):
             return ["ok"]
         if cmd.startswith("M106") or cmd.startswith("M107") or cmd.startswith("M42"):
             return ["ok"]
@@ -78,8 +78,9 @@ def test_relative_move_returns_to_absolute_mode():
     with make_ctrl() as c:
         c.move("X", 0.1, feed=600)
         w = list(c._serial.written)
-    assert "G91 G0 X0.1000 F600" in w
-    assert w[w.index("G91 G0 X0.1000 F600") + 1] == "G90"
+    assert "G91" in w
+    assert "G1 X0.1000 F600" in w
+    assert w[w.index("G1 X0.1000 F600") + 1] == "G90"
 
 
 def test_move_rejects_unknown_axis():
