@@ -10,7 +10,8 @@ __pycache__/
 .pio/
 *.hex
 *.elf
-firmware/Marlin/  # исходники Marlin качаются скриптом setup_firmware.py
+# Исходники Marlin качаются скриптом setup_firmware.py, в git не храним:
+firmware/Marlin/
 firmware/*.zip
 
 # IDE
