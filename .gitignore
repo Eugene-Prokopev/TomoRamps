@@ -10,7 +10,8 @@ __pycache__/
 .pio/
 *.hex
 *.elf
-firmware/Marlin/  # пока не храним всю прошивку, только наши конфиги и патчи
+firmware/Marlin/  # исходники Marlin качаются скриптом setup_firmware.py
+firmware/*.zip
 
 # IDE
 .vscode/
