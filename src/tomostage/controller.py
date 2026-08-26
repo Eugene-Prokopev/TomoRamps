@@ -24,13 +24,19 @@ class GCodeController:
 
     def __init__(self, port: str, baudrate: int = DEFAULT_BAUD,
                  timeout: float = 3.0,
-                 serial_factory: Optional[Callable] = None) -> None:
+                 serial_factory: Optional[Callable] = None,
+                 log_callback: Optional[Callable[[str], None]] = None) -> None:
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
         self._serial = None
         self._lock = threading.Lock()
         self._factory = serial_factory
+        self._log_callback = log_callback
+
+    def _log(self, text: str) -> None:
+        if self._log_callback:
+            self._log_callback(text)
 
     # --- соединение -------------------------------------------------
     def connect(self) -> None:
@@ -84,8 +90,10 @@ class GCodeController:
         if self._serial is None:
             raise TomoStageError("Нет соединения")
         with self._lock:
+            command = command.strip()
+            self._log(f">>> {command}")
             self._serial.reset_input_buffer()
-            self._serial.write((command.strip() + "\n").encode("ascii"))
+            self._serial.write((command + "\n").encode("ascii"))
             if not wait_ok:
                 return []
             info: list[str] = []
@@ -98,6 +106,7 @@ class GCodeController:
                     waited += step
                     continue
                 line = raw.decode("ascii", errors="replace").strip()
+                self._log(f"<<< {line}")
                 waited = 0.0
                 if not line or line == "ok":
                     if line == "ok":
@@ -129,7 +138,8 @@ class GCodeController:
         """Относительное перемещение по одной оси."""
         if axis not in AXES:
             raise ValueError(f"Ось должна быть из {AXES}, получено {axis!r}")
-        cmd = f"G91 G0 {axis}{distance:.4f}"
+        self.send("G91")
+        cmd = f"G1 {axis}{distance:.4f}"
         if feed:
             cmd += f" F{int(feed)}"
         self.send(cmd)

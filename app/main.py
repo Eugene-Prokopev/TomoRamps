@@ -11,10 +11,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
-    QMainWindow, QMessageBox, QPushButton, QSlider, QVBoxLayout, QWidget,
+    QLineEdit, QMainWindow, QMessageBox, QPushButton, QSlider, QTextEdit,
+    QVBoxLayout, QWidget,
 )
 
 from tomostage.controller import AXES, GCodeController, TomoStageError
@@ -46,12 +47,18 @@ class MainWindow(QMainWindow):
         self.stage: GCodeController | None = None
 
         central = QWidget()
-        root = QHBoxLayout(central)
-        root.addWidget(self._build_connect_box())
-        root.addWidget(self._build_jog_box(), 1)
-        root.addWidget(self._build_dc_box())
+        root = QVBoxLayout(central)
+        top = QHBoxLayout()
+        top.addWidget(self._build_connect_box())
+        top.addWidget(self._build_jog_box(), 1)
+        top.addWidget(self._build_dc_box())
+        root.addLayout(top)
+        root.addWidget(self._build_console_box())
         self.setCentralWidget(central)
         self.statusBar().showMessage("Не подключено")
+        self.endstop_timer = QTimer(self)
+        self.endstop_timer.setInterval(500)
+        self.endstop_timer.timeout.connect(self.read_endstops)
 
     def _build_connect_box(self) -> QGroupBox:
         box = QGroupBox("Соединение")
@@ -149,6 +156,45 @@ class MainWindow(QMainWindow):
         lay.addStretch()
         return box
 
+    def _build_console_box(self) -> QGroupBox:
+        box = QGroupBox("Консоль Marlin и журнал обмена")
+        lay = QVBoxLayout(box)
+        self.log_view = QTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setMinimumHeight(150)
+        self.log_view.setPlaceholderText("Здесь будут команды и ответы платы...")
+        lay.addWidget(self.log_view)
+        row = QHBoxLayout()
+        self.command_edit = QLineEdit()
+        self.command_edit.setPlaceholderText("Введите G-code, например M114 или M119")
+        self.command_edit.returnPressed.connect(self.send_console_command)
+        row.addWidget(self.command_edit, 1)
+        send = QPushButton("Отправить")
+        send.clicked.connect(self.send_console_command)
+        row.addWidget(send)
+        clear = QPushButton("Очистить")
+        clear.clicked.connect(self.log_view.clear)
+        row.addWidget(clear)
+        lay.addLayout(row)
+        return box
+
+    def append_log(self, text: str) -> None:
+        self.log_view.append(text)
+
+    def send_console_command(self) -> None:
+        if not (self.stage and self.stage.connected):
+            self.statusBar().showMessage("Сначала подключите плату")
+            return
+        command = self.command_edit.text().strip()
+        if not command:
+            return
+        try:
+            self.stage.send(command)
+        except TomoStageError as exc:
+            self.append_log(f"!!! {exc}")
+        finally:
+            self.command_edit.clear()
+
     def refresh_ports(self) -> None:
         current = self.port_combo.currentText()
         self.port_combo.clear()
@@ -158,6 +204,7 @@ class MainWindow(QMainWindow):
 
     def toggle_connect(self) -> None:
         if self.stage and self.stage.connected:
+            self.endstop_timer.stop()
             self.stage.close()
             self.btn_connect.setText("Подключить")
             self.statusBar().showMessage("Отключено")
@@ -166,7 +213,7 @@ class MainWindow(QMainWindow):
         if not port:
             QMessageBox.warning(self, "Нет порта", "Выберите COM-порт")
             return
-        self.stage = GCodeController(port)
+        self.stage = GCodeController(port, log_callback=self.append_log)
         try:
             self.stage.connect()
         except TomoStageError as exc:
@@ -177,6 +224,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Подключено: {port}")
         self.read_pos()
         self.read_endstops()
+        self.endstop_timer.start()
 
     def motors_on(self) -> None:
         if not (self.stage and self.stage.connected):
