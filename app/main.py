@@ -136,9 +136,9 @@ class MainWindow(QMainWindow):
         return box
 
     def _build_dc_box(self) -> QGroupBox:
-        box = QGroupBox("DC-мотор (пока не использовать)")
+        box = QGroupBox("DC-мотор через L298N")
         lay = QVBoxLayout(box)
-        lay.addWidget(QLabel("L298N подключим позже."))
+        lay.addWidget(QLabel("ENA=D9 PWM, IN1=D11, IN2=D6"))
         self.dc_slider = QSlider(Qt.Horizontal)
         self.dc_slider.setRange(0, 255)
         self.dc_slider.setValue(0)
@@ -148,12 +148,13 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.dc_value)
         self.btn_fwd = QPushButton("Вперёд")
         self.btn_back = QPushButton("Назад")
-        self.btn_fwd.clicked.connect(lambda: self.dc_dir(True))
-        self.btn_back.clicked.connect(lambda: self.dc_dir(False))
-        self.btn_fwd.setEnabled(False)
-        self.btn_back.setEnabled(False)
+        self.btn_fwd.clicked.connect(lambda: self.dc_run(True))
+        self.btn_back.clicked.connect(lambda: self.dc_run(False))
+        self.btn_stop = QPushButton("Стоп DC (M107)")
+        self.btn_stop.clicked.connect(self.dc_stop)
         lay.addWidget(self.btn_fwd)
         lay.addWidget(self.btn_back)
+        lay.addWidget(self.btn_stop)
         lay.addStretch()
         return box
 
@@ -293,12 +294,25 @@ class MainWindow(QMainWindow):
         self.read_endstops(log=False)
 
     def dc_changed(self, value: int) -> None:
-        self.dc_value.setText(str(value))
-        # DC-кнопки отключены до отдельного безопасного теста L298N.
+        self.dc_value.setText(f"{value}/255 ({value / 255 * 100:.0f}%)")
 
-    def dc_dir(self, forward: bool) -> None:
+    def dc_run(self, forward: bool) -> None:
+        if not (self.stage and self.stage.connected):
+            self.statusBar().showMessage("Сначала подключите плату")
+            return
+        try:
+            self.stage.dc_run(forward, self.dc_slider.value())
+            self.statusBar().showMessage("DC: вращение " + ("вперёд" if forward else "назад"))
+        except TomoStageError as exc:
+            self.statusBar().showMessage(f"Ошибка DC: {exc}")
+
+    def dc_stop(self) -> None:
         if self.stage and self.stage.connected:
-            self.stage.dc_direction(forward)
+            try:
+                self.stage.dc_stop()
+                self.statusBar().showMessage("DC остановлен")
+            except TomoStageError as exc:
+                self.statusBar().showMessage(f"Ошибка остановки DC: {exc}")
 
     def estop(self) -> None:
         if self.stage and self.stage.connected:

@@ -165,9 +165,19 @@ class GCodeController:
         self.send("M112", wait_ok=False)
 
     def dc_speed(self, value_0_255: int) -> None:
-        """Скорость DC-мотора (ШИМ на D9/ENA L298N). Направление задаётся отдельно."""
+        """PWM-скорость DC-мотора: D9/ENA L298N."""
         v = max(0, min(255, int(value_0_255)))
         self.send(f"M106 S{v}" if v else "M107")
+
+    def dc_stop(self) -> None:
+        """Остановить DC-мотор без изменения направления."""
+        self.send("M107")
+
+    def dc_run(self, forward: bool, value_0_255: int) -> None:
+        """Задать направление и запустить DC-мотор с выбранным PWM."""
+        self.dc_stop()
+        self.dc_direction(forward)
+        self.dc_speed(value_0_255)
 
     def dc_direction(self, forward: bool) -> None:
         """Направление DC-мотора: IN1=D11, IN2=D6."""
