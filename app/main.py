@@ -24,8 +24,8 @@ AXIS_TITLES = {
     "X": "X — точная ось",
     "Y": "Y — точная ось",
     "Z": "Z — грубая ось",
-    "A": "A — наклон",
-    "B": "B — вращение",
+    "A": "A — вращение (слот E1)",
+    "B": "B — наклон (слот E0)",
 }
 STEP_VALUES = ["0.01", "0.1", "1", "10", "100"]
 FEED_VALUES = ["30", "60", "120", "300", "600", "1200"]
@@ -56,9 +56,10 @@ class MainWindow(QMainWindow):
         root.addWidget(self._build_console_box())
         self.setCentralWidget(central)
         self.statusBar().showMessage("Не подключено")
-        self.endstop_timer = QTimer(self)
-        self.endstop_timer.setInterval(500)
-        self.endstop_timer.timeout.connect(self.read_endstops)
+        self.status_timer = QTimer(self)
+        self.status_timer.setInterval(1000)
+        self.status_timer.timeout.connect(self.poll_status)
+        self.previous_endstops: tuple[str, ...] | None = None
 
     def _build_connect_box(self) -> QGroupBox:
         box = QGroupBox("Соединение")
@@ -204,7 +205,7 @@ class MainWindow(QMainWindow):
 
     def toggle_connect(self) -> None:
         if self.stage and self.stage.connected:
-            self.endstop_timer.stop()
+            self.status_timer.stop()
             self.stage.close()
             self.btn_connect.setText("Подключить")
             self.statusBar().showMessage("Отключено")
@@ -222,9 +223,9 @@ class MainWindow(QMainWindow):
             return
         self.btn_connect.setText("Отключить")
         self.statusBar().showMessage(f"Подключено: {port}")
-        self.read_pos()
-        self.read_endstops()
-        self.endstop_timer.start()
+        self.read_pos(log=False)
+        self.read_endstops(log=False)
+        self.status_timer.start()
 
     def motors_on(self) -> None:
         if not (self.stage and self.stage.connected):
@@ -258,25 +259,38 @@ class MainWindow(QMainWindow):
         except TomoStageError as exc:
             self.statusBar().showMessage(f"Ошибка движения: {exc}")
 
-    def read_pos(self) -> None:
+    def read_pos(self, log: bool = True) -> None:
         if not (self.stage and self.stage.connected):
             return
         try:
-            for axis, value in self.stage.get_position().items():
+            for axis, value in self.stage.get_position(log=log).items():
                 self.pos_labels[axis].setText(f"{value:.3f}")
         except TomoStageError as exc:
             self.statusBar().showMessage(f"Ошибка M114: {exc}")
 
-    def read_endstops(self) -> None:
+    def read_endstops(self, log: bool = True) -> None:
         if not (self.stage and self.stage.connected):
             self.statusBar().showMessage("Сначала подключите плату")
             return
         try:
-            lines = self.stage.endstops()
-            text = " ".join(line for line in lines if "x_" in line.lower() or "xmin" in line.lower())
-            self.endstop_label.setText("Концевики X: " + (text or "ответ получен; смотрите журнал"))
+            lines = self.stage.endstops(log=log)
+            states = tuple(line.strip() for line in lines if ":" in line and any(
+                name in line.lower() for name in ("x_min", "x_max", "y_min", "y_max", "z_min", "z_max", "i_min", "j_min")
+            ))
+            x_text = " ".join(line for line in states if "x_" in line.lower())
+            self.endstop_label.setText("Концевики X: " + (x_text or "ответ получен"))
+            if states != self.previous_endstops:
+                self.previous_endstops = states
+                self.append_log("[концевики изменились] " + (" | ".join(states) or "нет данных"))
         except TomoStageError as exc:
             self.statusBar().showMessage(f"Ошибка M119: {exc}")
+
+    def poll_status(self) -> None:
+        """Периодически обновлять позицию и концевики без лишнего журнала."""
+        if not (self.stage and self.stage.connected):
+            return
+        self.read_pos(log=False)
+        self.read_endstops(log=False)
 
     def dc_changed(self, value: int) -> None:
         self.dc_value.setText(str(value))

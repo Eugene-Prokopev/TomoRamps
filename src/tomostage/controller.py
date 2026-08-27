@@ -2,7 +2,7 @@
 
 Связь с Arduino Mega (Marlin 2.1.x) по последовательному порту.
 Оси проекта: X, Y — точные (микровинты), Z — грубая (направляющая 1 м),
-I — наклон, J — вращение (слоты E0/E1). DC-мотор: M106/M107 + M42.
+A — вращение (слот E1), B — наклон (слот E0). DC-мотор: M106/M107 + M42.
 """
 from __future__ import annotations
 
@@ -85,13 +85,14 @@ class GCodeController:
         self.close()
 
     # --- обмен ------------------------------------------------------
-    def send(self, command: str, wait_ok: bool = True) -> list[str]:
+    def send(self, command: str, wait_ok: bool = True, log: bool = True) -> list[str]:
         """Отправить команду, вернуть список информационных строк ответа."""
         if self._serial is None:
             raise TomoStageError("Нет соединения")
         with self._lock:
             command = command.strip()
-            self._log(f">>> {command}")
+            if log:
+                self._log(f">>> {command}")
             self._serial.reset_input_buffer()
             self._serial.write((command + "\n").encode("ascii"))
             if not wait_ok:
@@ -106,7 +107,8 @@ class GCodeController:
                     waited += step
                     continue
                 line = raw.decode("ascii", errors="replace").strip()
-                self._log(f"<<< {line}")
+                if log:
+                    self._log(f"<<< {line}")
                 waited = 0.0
                 if not line or line == "ok":
                     if line == "ok":
@@ -121,9 +123,9 @@ class GCodeController:
             raise TomoStageError(f"Таймаут ответа на '{command}'")
 
     # --- команды уровня стола ---------------------------------------
-    def get_position(self) -> Dict[str, float]:
+    def get_position(self, log: bool = True) -> Dict[str, float]:
         """M114 -> {'X': .., 'Y': .., 'Z': .., 'I': .., 'J': ..}."""
-        resp = self.send("M114")
+        resp = self.send("M114", log=log)
         text = " ".join(resp)
         out: Dict[str, float] = {}
         for ax in AXES:
@@ -172,8 +174,8 @@ class GCodeController:
         self.send(f"M42 P11 S{1 if forward else 0}")
         self.send(f"M42 P6 S{0 if forward else 1}")
 
-    def endstops(self) -> list[str]:
-        return self.send("M119")
+    def endstops(self, log: bool = True) -> list[str]:
+        return self.send("M119", log=log)
 
     def firmware_info(self) -> str:
         return " ".join(self.send("M115"))
