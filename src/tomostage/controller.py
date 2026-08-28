@@ -11,7 +11,7 @@ import threading
 import time
 from typing import Callable, Dict, Optional
 
-AXES = ("X", "Y", "Z", "A", "B")
+AXES = ("X", "Y", "Z", "A", "B", "C")
 DEFAULT_BAUD = 250000
 
 
@@ -124,7 +124,7 @@ class GCodeController:
 
     # --- команды уровня стола ---------------------------------------
     def get_position(self, log: bool = True) -> Dict[str, float]:
-        """M114 -> {'X': .., 'Y': .., 'Z': .., 'I': .., 'J': ..}."""
+        """M114 -> координаты шести осей X/Y/Z/A/B/C."""
         resp = self.send("M114", log=log)
         text = " ".join(resp)
         out: Dict[str, float] = {}
@@ -147,7 +147,7 @@ class GCodeController:
         self.send(cmd)
         self.send("G90")  # вернулись в абсолют
 
-    def home(self, axes: str = "XYZAB") -> None:
+    def home(self, axes: str = "XYZABC") -> None:
         bad = set(axes.upper()) - set(AXES)
         if bad:
             raise ValueError(f"Неизвестные оси: {bad}")

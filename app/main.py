@@ -26,6 +26,7 @@ AXIS_TITLES = {
     "Z": "Z — грубая ось",
     "A": "A — вращение (слот E1)",
     "B": "B — наклон (слот E0)",
+    "C": "C — точная ось Z (TB6600)",
 }
 STEP_VALUES = ["0.01", "0.1", "1", "10", "100"]
 FEED_VALUES = ["30", "60", "120", "300", "600", "1200"]
@@ -51,7 +52,7 @@ class MainWindow(QMainWindow):
         top = QHBoxLayout()
         top.addWidget(self._build_connect_box())
         top.addWidget(self._build_jog_box(), 1)
-        top.addWidget(self._build_dc_box())
+        top.addWidget(self._build_external_axis_box())
         root.addLayout(top)
         root.addWidget(self._build_console_box())
         self.setCentralWidget(central)
@@ -135,26 +136,12 @@ class MainWindow(QMainWindow):
         grid.addWidget(read, len(AXES) + 4, 0, 1, 5)
         return box
 
-    def _build_dc_box(self) -> QGroupBox:
-        box = QGroupBox("DC-мотор через L298N")
+    def _build_external_axis_box(self) -> QGroupBox:
+        box = QGroupBox("Внешняя точная ось Z")
         lay = QVBoxLayout(box)
-        lay.addWidget(QLabel("ENA=D9 PWM, IN1=D11, IN2=D6"))
-        self.dc_slider = QSlider(Qt.Horizontal)
-        self.dc_slider.setRange(0, 255)
-        self.dc_slider.setValue(0)
-        self.dc_slider.valueChanged.connect(self.dc_changed)
-        lay.addWidget(self.dc_slider)
-        self.dc_value = QLabel("0")
-        lay.addWidget(self.dc_value)
-        self.btn_fwd = QPushButton("Вперёд")
-        self.btn_back = QPushButton("Назад")
-        self.btn_fwd.clicked.connect(lambda: self.dc_run(True))
-        self.btn_back.clicked.connect(lambda: self.dc_run(False))
-        self.btn_stop = QPushButton("Стоп DC (M107)")
-        self.btn_stop.clicked.connect(self.dc_stop)
-        lay.addWidget(self.btn_fwd)
-        lay.addWidget(self.btn_back)
-        lay.addWidget(self.btn_stop)
+        lay.addWidget(QLabel("C = TB6600; STEP/DIR/EN через Mega"))
+        lay.addWidget(QLabel("Управление: кнопки C− / C+ слева"))
+        lay.addWidget(QLabel("Пока без HOME: концевик C не подключён"))
         lay.addStretch()
         return box
 
