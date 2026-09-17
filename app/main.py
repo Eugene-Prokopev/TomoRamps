@@ -116,6 +116,7 @@ class MainWindow(QMainWindow):
         grid.addWidget(QLabel("мм/мин"), 1, 2)
 
         self.pos_labels: dict[str, QLabel] = {}
+        self.endstop_widgets: dict[str, dict[str, QLabel]] = {}
         for row, axis in enumerate(AXES, start=3):
             grid.addWidget(QLabel(AXIS_TITLES[axis]), row, 0)
             minus = QPushButton(f"{axis} −")
@@ -125,11 +126,16 @@ class MainWindow(QMainWindow):
             grid.addWidget(minus, row, 1)
             grid.addWidget(plus, row, 2)
             pos = QLabel("—")
-            pos.setMinimumWidth(100)
+            pos.setMinimumWidth(85)
             pos.setAlignment(Qt.AlignCenter)
             self.pos_labels[axis] = pos
             grid.addWidget(QLabel("Позиция:"), row, 3)
             grid.addWidget(pos, row, 4)
+            min_led = self._make_endstop_indicator("MIN")
+            max_led = self._make_endstop_indicator("MAX")
+            self.endstop_widgets[axis] = {"min": min_led, "max": max_led}
+            grid.addWidget(min_led, row, 5)
+            grid.addWidget(max_led, row, 6)
 
         read = QPushButton("Прочитать координаты (M114)")
         read.clicked.connect(self.read_pos)
@@ -144,6 +150,23 @@ class MainWindow(QMainWindow):
         lay.addWidget(QLabel("Пока без HOME: концевик C не подключён"))
         lay.addStretch()
         return box
+
+    def _make_endstop_indicator(self, name: str) -> QLabel:
+        label = QLabel(name)
+        label.setAlignment(Qt.AlignCenter)
+        label.setMinimumWidth(48)
+        label.setToolTip("Серый = open / не сработал; красный = TRIGGERED")
+        self._set_endstop_indicator(label, False, "нет данных")
+        return label
+
+    @staticmethod
+    def _set_endstop_indicator(label: QLabel, triggered: bool, state: str) -> None:
+        color = "#d9534f" if triggered else "#777777"
+        label.setText(state.upper())
+        label.setStyleSheet(
+            f"background-color:{color}; color:white; padding:3px; "
+            "border-radius:3px; font-weight:bold;"
+        )
 
     def _build_console_box(self) -> QGroupBox:
         box = QGroupBox("Консоль Marlin и журнал обмена")
@@ -263,8 +286,24 @@ class MainWindow(QMainWindow):
         try:
             lines = self.stage.endstops(log=log)
             states = tuple(line.strip() for line in lines if ":" in line and any(
-                name in line.lower() for name in ("x_min", "x_max", "y_min", "y_max", "z_min", "z_max", "i_min", "j_min")
+                name in line.lower() for name in (
+                    "x_min", "x_max", "y_min", "y_max", "z_min", "z_max",
+                    "a_min", "a_max", "b_min", "b_max", "c_min", "c_max",
+                    "i_min", "i_max", "j_min", "j_max", "k_min", "k_max"
+                )
             ))
+            for line in states:
+                name, value = line.split(":", 1)
+                parts = name.strip().lower().split("_")
+                if len(parts) != 2:
+                    continue
+                axis = {"i": "A", "j": "B", "k": "C"}.get(parts[0], parts[0].upper())
+                side = parts[1]
+                if axis in self.endstop_widgets and side in ("min", "max"):
+                    triggered = "triggered" in value.lower()
+                    self._set_endstop_indicator(
+                        self.endstop_widgets[axis][side], triggered, value.strip()
+                    )
             x_text = " ".join(line for line in states if "x_" in line.lower())
             self.endstop_label.setText("Концевики X: " + (x_text or "ответ получен"))
             if states != self.previous_endstops:
