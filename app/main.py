@@ -13,20 +13,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit, QMainWindow, QMessageBox, QPushButton, QSlider, QTextEdit,
-    QVBoxLayout, QWidget,
+    QApplication, QComboBox, QDoubleSpinBox, QGridLayout, QGroupBox,
+    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton,
+    QSlider, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from tomostage.controller import AXES, GCodeController, TomoStageError
 
+# Порядок строк соответствует физическому столу, а не буквам Marlin.
+DISPLAY_AXES = ("X", "Y", "C", "A", "B", "Z")
 AXIS_TITLES = {
-    "X": "X — точная ось",
-    "Y": "Y — точная ось",
-    "Z": "Z — грубая ось",
-    "A": "A — вращение (слот E1)",
-    "B": "B — наклон (слот E0)",
-    "C": "C — точная ось Z (TB6600)",
+    "X": "X — точный (X)",
+    "Y": "Y — точный (Y)",
+    "C": "Z — точный (C)",
+    "A": "Вращение (A)",
+    "B": "Наклон (B)",
+    "Z": "XX — грубый (Z)",
 }
 STEP_VALUES = ["0.01", "0.1", "1", "10", "100"]
 FEED_VALUES = ["30", "60", "120", "300", "600", "1200"]
@@ -46,13 +48,18 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("TomoRamps — Jog-пульт")
         self.resize(900, 520)
         self.stage: GCodeController | None = None
+        self.continuous_axis: str | None = None
+        self.continuous_direction = 0
+        self.continuous_timer = QTimer(self)
+        self.continuous_timer.setInterval(120)
+        self.continuous_timer.timeout.connect(self._continuous_tick)
 
         central = QWidget()
         root = QVBoxLayout(central)
         top = QHBoxLayout()
         top.addWidget(self._build_connect_box())
         top.addWidget(self._build_jog_box(), 1)
-        top.addWidget(self._build_external_axis_box())
+        # Управление DC/внешней осью отдельным блоком больше не показываем.
         root.addLayout(top)
         root.addWidget(self._build_console_box())
         self.setCentralWidget(central)
@@ -101,28 +108,42 @@ class MainWindow(QMainWindow):
         box = QGroupBox("Jog-перемещение (относительное, как в Candle)")
         grid = QGridLayout(box)
 
-        grid.addWidget(QLabel("Шаг перемещения:"), 0, 0)
+        grid.addWidget(QLabel("Шаг перемещения (свой тоже можно ввести):"), 0, 0)
         self.step_combo = QComboBox()
+        self.step_combo.setEditable(True)
         self.step_combo.addItems(STEP_VALUES)
         self.step_combo.setCurrentText("0.1")
         grid.addWidget(self.step_combo, 0, 1)
         grid.addWidget(QLabel("мм / град"), 0, 2)
 
-        grid.addWidget(QLabel("Подача:"), 1, 0)
+        grid.addWidget(QLabel("Подача (свою можно ввести):"), 1, 0)
         self.feed_combo = QComboBox()
+        self.feed_combo.setEditable(True)
         self.feed_combo.addItems(FEED_VALUES)
         self.feed_combo.setCurrentText("60")
         grid.addWidget(self.feed_combo, 1, 1)
         grid.addWidget(QLabel("мм/мин"), 1, 2)
 
+        grid.addWidget(QLabel("Режим:"), 0, 3)
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Один шаг", "Непрерывно при удержании"])
+        grid.addWidget(self.mode_combo, 0, 4, 1, 2)
+
         self.pos_labels: dict[str, QLabel] = {}
         self.endstop_widgets: dict[str, dict[str, QLabel]] = {}
-        for row, axis in enumerate(AXES, start=3):
+        grid.addWidget(QLabel("Ось / jog"), 2, 0)
+        grid.addWidget(QLabel("MIN"), 2, 5)
+        grid.addWidget(QLabel("MAX"), 2, 6)
+        for row, axis in enumerate(DISPLAY_AXES, start=3):
             grid.addWidget(QLabel(AXIS_TITLES[axis]), row, 0)
             minus = QPushButton(f"{axis} −")
             plus = QPushButton(f"{axis} +")
             minus.clicked.connect(lambda _=False, a=axis: self.jog(a, -1))
             plus.clicked.connect(lambda _=False, a=axis: self.jog(a, 1))
+            minus.pressed.connect(lambda a=axis: self.start_continuous(a, -1))
+            plus.pressed.connect(lambda a=axis: self.start_continuous(a, 1))
+            minus.released.connect(self.stop_continuous)
+            plus.released.connect(self.stop_continuous)
             grid.addWidget(minus, row, 1)
             grid.addWidget(plus, row, 2)
             pos = QLabel("—")
@@ -259,16 +280,40 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Ошибка M18: {exc}")
 
     def jog(self, axis: str, direction: int) -> None:
+        if self.mode_combo.currentIndex() == 1:
+            return
+        self._move_once(axis, direction)
+
+    def _move_once(self, axis: str, direction: int) -> None:
         if not (self.stage and self.stage.connected):
             self.statusBar().showMessage("Сначала подключите плату")
             return
-        distance = float(self.step_combo.currentText()) * direction
-        feed = int(self.feed_combo.currentText())
         try:
+            distance = float(self.step_combo.currentText()) * direction
+            feed = int(float(self.feed_combo.currentText()))
+            if distance == 0 or feed <= 0:
+                raise ValueError("шаг и подача должны быть больше нуля")
             self.stage.move(axis, distance, feed=feed)
             self.read_pos()
-        except TomoStageError as exc:
+        except (TomoStageError, ValueError) as exc:
             self.statusBar().showMessage(f"Ошибка движения: {exc}")
+
+    def start_continuous(self, axis: str, direction: int) -> None:
+        if self.mode_combo.currentIndex() != 1:
+            return
+        self.continuous_axis = axis
+        self.continuous_direction = direction
+        self._continuous_tick()
+        self.continuous_timer.start()
+
+    def stop_continuous(self) -> None:
+        self.continuous_timer.stop()
+        self.continuous_axis = None
+        self.continuous_direction = 0
+
+    def _continuous_tick(self) -> None:
+        if self.continuous_axis:
+            self._move_once(self.continuous_axis, self.continuous_direction)
 
     def read_pos(self, log: bool = True) -> None:
         if not (self.stage and self.stage.connected):
