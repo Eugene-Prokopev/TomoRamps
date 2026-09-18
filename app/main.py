@@ -411,8 +411,11 @@ class MainWindow(QMainWindow):
             return
         self.continuous_axis = axis
         self.continuous_direction = direction
+        # Непрерывный режим всегда использует короткий сегмент, чтобы отпускание
+        # кнопки не ждало завершения большого выбранного шага (например 10 мм).
+        continuous_step = min(abs(self._step_value()), 0.1)
         self.jog_worker = JogWorker(
-            self.stage, axis, direction, self._step_value(), self._feed_value(),
+            self.stage, axis, direction, continuous_step, self._feed_value(),
             self._direction_blocked,
         )
         self.jog_worker.failed.connect(lambda msg: self.append_log(f"!!! jog: {msg}"))
