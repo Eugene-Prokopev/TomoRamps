@@ -134,6 +134,7 @@ class MainWindow(QMainWindow):
         grid.addWidget(QLabel("Ось / jog"), 2, 0)
         grid.addWidget(QLabel("MIN"), 2, 5)
         grid.addWidget(QLabel("MAX"), 2, 6)
+        grid.addWidget(QLabel("Ноль"), 2, 7)
         for row, axis in enumerate(DISPLAY_AXES, start=3):
             grid.addWidget(QLabel(AXIS_TITLES[axis]), row, 0)
             minus = QPushButton(f"{axis} −")
@@ -157,6 +158,10 @@ class MainWindow(QMainWindow):
             self.endstop_widgets[axis] = {"min": min_led, "max": max_led}
             grid.addWidget(min_led, row, 5)
             grid.addWidget(max_led, row, 6)
+            zero = QPushButton("Ноль")
+            zero.setToolTip(f"G92 {axis}0 — обнулить текущую координату {axis}")
+            zero.clicked.connect(lambda _=False, a=axis: self.set_zero(a))
+            grid.addWidget(zero, row, 7)
 
         read = QPushButton("Прочитать координаты (M114)")
         read.clicked.connect(self.read_pos)
@@ -258,6 +263,17 @@ class MainWindow(QMainWindow):
         self.read_pos(log=False)
         self.read_endstops(log=False)
         self.status_timer.start()
+
+    def set_zero(self, axis: str) -> None:
+        if not (self.stage and self.stage.connected):
+            self.statusBar().showMessage("Сначала подключите плату")
+            return
+        try:
+            self.stage.set_zero(axis)
+            self.read_pos()
+            self.statusBar().showMessage(f"Ось {axis} обнулена командой G92")
+        except TomoStageError as exc:
+            self.statusBar().showMessage(f"Ошибка обнуления: {exc}")
 
     def motors_on(self) -> None:
         if not (self.stage and self.stage.connected):

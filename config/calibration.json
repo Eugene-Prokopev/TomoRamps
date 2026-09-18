@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "units": {
+    "X": "mm",
+    "Y": "mm",
+    "Z": "mm",
+    "C": "mm",
+    "A": "degree",
+    "B": "degree"
+  },
+  "axes": {
+    "X": {"steps_per_unit": 80.0, "min": null, "max": null},
+    "Y": {"steps_per_unit": 80.0, "min": null, "max": null},
+    "Z": {"steps_per_unit": 80.0, "min": null, "max": null},
+    "C": {"steps_per_unit": 80.0, "min": null, "max": null},
+    "A": {"steps_per_unit": 80.0, "min": null, "max": null},
+    "B": {"steps_per_unit": 80.0, "min": null, "max": null}
+  },
+  "notes": "Initial values are placeholders. Update after measuring each axis; write to Marlin with M92 and save with M500."
+}
