@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QGridLayout, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton,
@@ -43,12 +43,34 @@ def list_ports() -> list[str]:
         return []
 
 
+class ConsoleWorker(QThread):
+    done = Signal(list)
+    failed = Signal(str)
+
+    def __init__(self, stage: GCodeController, command: str, timeout: float = 60.0) -> None:
+        super().__init__()
+        self.stage = stage
+        self.command = command
+        self.timeout = timeout
+
+    def run(self) -> None:
+        try:
+            lines = self.stage.send(self.command, timeout_seconds=self.timeout)
+            self.done.emit(lines)
+        except Exception as exc:
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+
+
 class MainWindow(QMainWindow):
+    log_signal = Signal(str)
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("TomoRamps — Jog-пульт")
         self.resize(900, 520)
         self.stage: GCodeController | None = None
+        self.console_worker: ConsoleWorker | None = None
+        self.log_signal.connect(self.append_log)
         self.continuous_axis: str | None = None
         self.continuous_direction = 0
         self.continuous_timer = QTimer(self)
@@ -233,13 +255,27 @@ class MainWindow(QMainWindow):
         command = self.command_edit.text().strip()
         if not command:
             return
-        try:
-            self.stage.send(command)
-        except Exception as exc:
-            self.append_log(f"!!! {type(exc).__name__}: {exc}")
-            self.statusBar().showMessage("Команда завершилась ошибкой; подробности в журнале")
-        finally:
-            self.command_edit.clear()
+        if self.console_worker and self.console_worker.isRunning():
+            self.statusBar().showMessage("Предыдущая команда ещё выполняется")
+            return
+        self.command_edit.clear()
+        self.command_edit.setEnabled(False)
+        timeout = 90.0 if command.upper().startswith("G28") else 20.0
+        self.console_worker = ConsoleWorker(self.stage, command, timeout)
+        self.console_worker.done.connect(self.console_command_done)
+        self.console_worker.failed.connect(self.console_command_failed)
+        self.console_worker.finished.connect(lambda: self.command_edit.setEnabled(True))
+        self.console_worker.start()
+
+    def console_command_done(self, lines: list[str]) -> None:
+        self.statusBar().showMessage("Команда завершена")
+        if any(line.lower().startswith("g28") for line in lines):
+            self.read_pos(log=False)
+            self.read_endstops(log=False)
+
+    def console_command_failed(self, message: str) -> None:
+        self.append_log(f"!!! {message}")
+        self.statusBar().showMessage("Команда завершилась ошибкой; подробности в журнале")
 
     def refresh_ports(self) -> None:
         current = self.port_combo.currentText()
@@ -259,7 +295,7 @@ class MainWindow(QMainWindow):
         if not port:
             QMessageBox.warning(self, "Нет порта", "Выберите COM-порт")
             return
-        self.stage = GCodeController(port, log_callback=self.append_log)
+        self.stage = GCodeController(port, log_callback=self.log_signal.emit)
         try:
             self.stage.connect()
         except TomoStageError as exc:

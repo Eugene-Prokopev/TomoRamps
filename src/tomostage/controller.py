@@ -85,7 +85,8 @@ class GCodeController:
         self.close()
 
     # --- обмен ------------------------------------------------------
-    def send(self, command: str, wait_ok: bool = True, log: bool = True) -> list[str]:
+    def send(self, command: str, wait_ok: bool = True, log: bool = True,
+             timeout_seconds: float | None = None) -> list[str]:
         """Отправить команду, вернуть список информационных строк ответа."""
         if self._serial is None:
             raise TomoStageError("Нет соединения")
@@ -98,7 +99,7 @@ class GCodeController:
             if not wait_ok:
                 return []
             info: list[str] = []
-            deadline = self.timeout * 4
+            deadline = timeout_seconds if timeout_seconds is not None else self.timeout * 4
             waited = 0.0
             step = 0.02
             while waited < deadline:
