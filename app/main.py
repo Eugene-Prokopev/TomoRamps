@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -68,6 +69,12 @@ class MainWindow(QMainWindow):
         self.status_timer.setInterval(1000)
         self.status_timer.timeout.connect(self.poll_status)
         self.previous_endstops: tuple[str, ...] | None = None
+        # None = ещё не получили состояние; True = TRIGGERED; False = open.
+        self.endstop_state: dict[tuple[str, str], bool | None] = {
+            (axis, side): None
+            for axis in AXES
+            for side in ("min", "max")
+        }
 
     def _build_connect_box(self) -> QGroupBox:
         box = QGroupBox("Соединение")
@@ -228,8 +235,9 @@ class MainWindow(QMainWindow):
             return
         try:
             self.stage.send(command)
-        except TomoStageError as exc:
-            self.append_log(f"!!! {exc}")
+        except Exception as exc:
+            self.append_log(f"!!! {type(exc).__name__}: {exc}")
+            self.statusBar().showMessage("Команда завершилась ошибкой; подробности в журнале")
         finally:
             self.command_edit.clear()
 
@@ -304,6 +312,11 @@ class MainWindow(QMainWindow):
         if not (self.stage and self.stage.connected):
             self.statusBar().showMessage("Сначала подключите плату")
             return
+        side = "max" if direction > 0 else "min"
+        if self.endstop_state.get((axis, side)) is True:
+            self.stop_continuous()
+            self.statusBar().showMessage(f"Движение заблокировано: {axis}_{side} активен")
+            return
         try:
             distance = float(self.step_combo.currentText()) * direction
             feed = int(float(self.feed_combo.currentText()))
@@ -367,9 +380,29 @@ class MainWindow(QMainWindow):
                     )
             x_text = " ".join(line for line in states if "x_" in line.lower())
             self.endstop_label.setText("Концевики X: " + (x_text or "ответ получен"))
+            for line in states:
+                match = re.match(r"^([a-z]+)_(min|max):\s*(open|triggered)", line.lower())
+                if not match:
+                    continue
+                raw_axis, side, raw_state = match.groups()
+                axis = {"k": "C", "c": "C"}.get(raw_axis, raw_axis.upper())
+                if axis not in AXES:
+                    continue
+                self.endstop_state[(axis, side)] = raw_state == "triggered"
+                widget = self.endstop_widgets.get(axis, {}).get(side)
+                if widget:
+                    self._set_endstop_indicator(widget, raw_state == "triggered", raw_state)
+
             if states != self.previous_endstops:
                 self.previous_endstops = states
                 self.append_log("[концевики изменились] " + (" | ".join(states) or "нет данных"))
+
+            # Если непрерывный jog шёл в активный концевик — немедленно
+            # прекращаем отправку следующих сегментов.
+            if self.continuous_axis and self.continuous_direction:
+                side = "max" if self.continuous_direction > 0 else "min"
+                if self.endstop_state.get((self.continuous_axis, side)) is True:
+                    self.stop_continuous()
         except TomoStageError as exc:
             self.statusBar().showMessage(f"Ошибка M119: {exc}")
 
