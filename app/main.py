@@ -61,6 +61,33 @@ class ConsoleWorker(QThread):
             self.failed.emit(f"{type(exc).__name__}: {exc}")
 
 
+class JogWorker(QThread):
+    failed = Signal(str)
+
+    def __init__(self, stage: GCodeController, axis: str, direction: int,
+                 step: float, feed: int, blocked) -> None:
+        super().__init__()
+        self.stage = stage
+        self.axis = axis
+        self.direction = direction
+        self.step = step
+        self.feed = feed
+        self.blocked = blocked
+        self.stop_requested = False
+
+    def request_stop(self) -> None:
+        self.stop_requested = True
+
+    def run(self) -> None:
+        try:
+            while not self.stop_requested:
+                if self.blocked(self.axis, self.direction):
+                    break
+                self.stage.move(self.axis, self.step * self.direction, feed=self.feed)
+        except Exception as exc:
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+
+
 class MainWindow(QMainWindow):
     log_signal = Signal(str)
 
@@ -73,9 +100,7 @@ class MainWindow(QMainWindow):
         self.log_signal.connect(self.append_log)
         self.continuous_axis: str | None = None
         self.continuous_direction = 0
-        self.continuous_timer = QTimer(self)
-        self.continuous_timer.setInterval(120)
-        self.continuous_timer.timeout.connect(self._continuous_tick)
+        self.jog_worker: JogWorker | None = None
 
         central = QWidget()
         root = QVBoxLayout(central)
@@ -247,6 +272,13 @@ class MainWindow(QMainWindow):
 
     def append_log(self, text: str) -> None:
         self.log_view.append(text)
+        try:
+            log_path = Path(__file__).resolve().parents[1] / "logs" / "serial.log"
+            log_path.parent.mkdir(exist_ok=True)
+            with log_path.open("a", encoding="utf-8") as stream:
+                stream.write(text + "\n")
+        except OSError:
+            pass
 
     def send_console_command(self) -> None:
         if not (self.stage and self.stage.connected):
@@ -366,19 +398,36 @@ class MainWindow(QMainWindow):
     def start_continuous(self, axis: str, direction: int) -> None:
         if self.mode_combo.currentIndex() != 1:
             return
+        if self.jog_worker and self.jog_worker.isRunning():
+            return
+        if self._direction_blocked(axis, direction):
+            side = "max" if direction > 0 else "min"
+            self.statusBar().showMessage(f"Движение заблокировано: {axis}_{side} активен")
+            return
         self.continuous_axis = axis
         self.continuous_direction = direction
-        self._continuous_tick()
-        self.continuous_timer.start()
+        self.jog_worker = JogWorker(
+            self.stage, axis, direction, self._step_value(), self._feed_value(),
+            self._direction_blocked,
+        )
+        self.jog_worker.failed.connect(lambda msg: self.append_log(f"!!! jog: {msg}"))
+        self.jog_worker.start()
 
     def stop_continuous(self) -> None:
-        self.continuous_timer.stop()
+        if self.jog_worker and self.jog_worker.isRunning():
+            self.jog_worker.request_stop()
         self.continuous_axis = None
         self.continuous_direction = 0
 
-    def _continuous_tick(self) -> None:
-        if self.continuous_axis:
-            self._move_once(self.continuous_axis, self.continuous_direction)
+    def _direction_blocked(self, axis: str, direction: int) -> bool:
+        side = "max" if direction > 0 else "min"
+        return self.endstop_state.get((axis, side)) is True
+
+    def _step_value(self) -> float:
+        return float(self.step_combo.currentText())
+
+    def _feed_value(self) -> int:
+        return int(float(self.feed_combo.currentText()))
 
     def read_pos(self, log: bool = True) -> None:
         if not (self.stage and self.stage.connected):
@@ -481,6 +530,14 @@ def main() -> int:
     window = MainWindow()
     window.show()
     return app.exec()
+
+    def closeEvent(self, event) -> None:
+        self.stop_continuous()
+        if self.console_worker and self.console_worker.isRunning():
+            self.console_worker.wait(2000)
+        if self.stage:
+            self.stage.close()
+        event.accept()
 
 
 if __name__ == "__main__":
