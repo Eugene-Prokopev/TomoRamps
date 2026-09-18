@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import sys
+import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -152,6 +153,10 @@ class MainWindow(QMainWindow):
         estop.setStyleSheet("background:#c0392b; color:white; font-weight:bold")
         estop.clicked.connect(self.estop)
         lay.addWidget(estop)
+        quick = QPushButton("Быстрый стоп движений (M410)")
+        quick.setStyleSheet("background:#e67e22; color:white; font-weight:bold")
+        quick.clicked.connect(self.quick_stop)
+        lay.addWidget(quick)
         self.endstop_label = QLabel("Концевики: не проверены")
         self.endstop_label.setWordWrap(True)
         lay.addWidget(self.endstop_label)
@@ -519,17 +524,23 @@ class MainWindow(QMainWindow):
             except TomoStageError as exc:
                 self.statusBar().showMessage(f"Ошибка остановки DC: {exc}")
 
+    def quick_stop(self) -> None:
+        self.stop_continuous()
+        try:
+            if self.stage:
+                self.stage.quick_stop()
+            self.statusBar().showMessage("M410 отправлен: движения остановлены")
+        except Exception as exc:
+            self.append_log(f"!!! quick stop: {type(exc).__name__}: {exc}")
+
     def estop(self) -> None:
-        if self.stage and self.stage.connected:
-            self.stage.emergency_stop()
-        self.statusBar().showMessage("M112 отправлен")
-
-
-def main() -> int:
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    return app.exec()
+        self.stop_continuous()
+        try:
+            if self.stage:
+                self.stage.emergency_stop()
+            self.statusBar().showMessage("M112 отправлен — требуется перезапуск Marlin")
+        except Exception as exc:
+            self.append_log(f"!!! emergency stop: {type(exc).__name__}: {exc}")
 
     def closeEvent(self, event) -> None:
         self.stop_continuous()
@@ -538,6 +549,24 @@ def main() -> int:
         if self.stage:
             self.stage.close()
         event.accept()
+
+
+def _write_uncaught_exception(exc_type, exc_value, exc_tb) -> None:
+    try:
+        path = Path(__file__).resolve().parents[1] / "logs" / "crash.log"
+        path.parent.mkdir(exist_ok=True)
+        with path.open("a", encoding="utf-8") as stream:
+            traceback.print_exception(exc_type, exc_value, exc_tb, file=stream)
+    finally:
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+
+def main() -> int:
+    sys.excepthook = _write_uncaught_exception
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    return app.exec()
 
 
 if __name__ == "__main__":

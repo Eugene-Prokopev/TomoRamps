@@ -168,8 +168,21 @@ class GCodeController:
         """Отключить силовые выходы шаговых драйверов."""
         self.send("M18")
 
+    def quick_stop(self) -> None:
+        """M410: немедленно остановить текущие движения и очистить очередь."""
+        self._interrupt("M410")
+
     def emergency_stop(self) -> None:
-        self.send("M112", wait_ok=False)
+        """M112: аварийный останов Marlin без ожидания ответа."""
+        self._interrupt("M112")
+
+    def _interrupt(self, command: str) -> None:
+        if not self._serial or not self.connected:
+            return
+        # Не берём обычный lock: он может быть занят worker-ом, который ждёт
+        # завершения движения. M410/M112 должны уйти немедленно.
+        self._serial.write((command + "\n").encode("ascii"))
+        self._log(f">>> {command} (interrupt)")
 
     def dc_speed(self, value_0_255: int) -> None:
         """PWM-скорость DC-мотора: D9/ENA L298N."""
