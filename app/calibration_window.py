@@ -6,6 +6,7 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 from statistics import mean, pstdev
 from typing import Callable
 
@@ -74,6 +75,21 @@ def parse_m503_steps(lines: list[str]) -> dict[str, float]:
             if axis in DISPLAY_AXES:
                 result[axis] = float(raw_value)
     return result
+
+
+class StageWorker(QThread):
+    done = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, fn: Callable[[], object]) -> None:
+        super().__init__()
+        self.fn = fn
+
+    def run(self) -> None:
+        try:
+            self.done.emit(self.fn())
+        except Exception as exc:
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
 
 
 class CalibrationWindow(QDialog):
@@ -145,7 +161,8 @@ class CalibrationWindow(QDialog):
 
         self.axis_combo.currentTextChanged.connect(self._axis_changed)
         self._axis_changed(self.axis_combo.currentText())
-        self.read_m503()
+        if self.stage is not None and getattr(self.stage, "connected", True):
+            self.read_m503()
 
     # ---------- UI ----------
     def _build_header(self) -> QGroupBox:
