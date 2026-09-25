@@ -37,6 +37,14 @@ STEP_VALUES = ["0.01", "0.1", "1", "10", "100"]
 FEED_VALUES = ["30", "60", "120", "300", "600", "1200"]
 
 
+def parse_user_float(value: str) -> float:
+    """Parse a GUI number with either decimal comma or decimal point."""
+    text = str(value).strip().replace(",", ".")
+    if not text:
+        raise ValueError("число не может быть пустым")
+    return float(text)
+
+
 def list_ports() -> list[str]:
     try:
         from serial.tools import list_ports
@@ -67,7 +75,7 @@ class JogWorker(QThread):
     failed = Signal(str)
 
     def __init__(self, stage: GCodeController, axis: str, direction: int,
-                 step: float, feed: int, blocked) -> None:
+                 step: float, feed: float, blocked) -> None:
         super().__init__()
         self.stage = stage
         self.axis = axis
@@ -418,8 +426,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Движение заблокировано: {axis}_{side} активен")
             return
         try:
-            distance = float(self.step_combo.currentText()) * direction
-            feed = int(float(self.feed_combo.currentText()))
+            distance = parse_user_float(self.step_combo.currentText()) * direction
+            feed = parse_user_float(self.feed_combo.currentText())
             if distance == 0 or feed <= 0:
                 raise ValueError("шаг и подача должны быть больше нуля")
             self.stage.move(axis, distance, feed=feed)
@@ -459,10 +467,10 @@ class MainWindow(QMainWindow):
         return self.endstop_state.get((axis, side)) is True
 
     def _step_value(self) -> float:
-        return float(self.step_combo.currentText())
+        return parse_user_float(self.step_combo.currentText())
 
-    def _feed_value(self) -> int:
-        return int(float(self.feed_combo.currentText()))
+    def _feed_value(self) -> float:
+        return parse_user_float(self.feed_combo.currentText())
 
     def read_pos(self, log: bool = True) -> None:
         if not (self.stage and self.stage.connected):

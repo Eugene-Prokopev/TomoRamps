@@ -15,6 +15,12 @@ AXES = ("X", "Y", "Z", "A", "B", "C")
 DEFAULT_BAUD = 250000
 
 
+def format_gcode_number(value: float) -> str:
+    """Format a number as decimal G-code, without scientific notation."""
+    text = f"{float(value):.12f}".rstrip("0").rstrip(".")
+    return "0" if text in ("", "-0") else text
+
+
 class TomoStageError(RuntimeError):
     """Ошибка связи или отказа прошивки."""
 
@@ -141,14 +147,16 @@ class GCodeController:
             raise TomoStageError(f"Не распарсены координаты: {text!r}")
         return out
 
-    def move(self, axis: str, distance: float, feed: Optional[int] = None) -> None:
+    def move(self, axis: str, distance: float, feed: Optional[float] = None) -> None:
         """Относительное перемещение по одной оси."""
         if axis not in AXES:
             raise ValueError(f"Ось должна быть из {AXES}, получено {axis!r}")
         self.send("G91")
-        cmd = f"G1 {axis}{distance:.4f}"
+        # Не округляем координату до 4 знаков: калибровка может требовать
+        # более мелкого дробного шага. Формат .12g не добавляет лишние нули.
+        cmd = f"G1 {axis}{format_gcode_number(distance)}"
         if feed:
-            cmd += f" F{int(feed)}"
+            cmd += f" F{format_gcode_number(feed)}"
         self.send(cmd)
         self.send("G90")  # вернулись в абсолют
 

@@ -82,8 +82,8 @@ def test_relative_move_returns_to_absolute_mode():
         c.move("X", 0.1, feed=600)
         w = list(c._serial.written)
     assert "G91" in w
-    assert "G1 X0.1000 F600" in w
-    assert w[w.index("G1 X0.1000 F600") + 1] == "G90"
+    assert "G1 X0.1 F600" in w
+    assert w[w.index("G1 X0.1 F600") + 1] == "G90"
 
 
 def test_move_rejects_unknown_axis():
