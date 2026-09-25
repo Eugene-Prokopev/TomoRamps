@@ -1,80 +1,251 @@
-# TomoRamps — контроллер предметного стола томографа
+# TomoRamps
 
-Управление позиционированием образца: **Arduino Mega 2560 + RAMPS 1.6**, пять шаговых
-двигателей (драйверы A4988) + один DC-мотор 12 В. Прошивка — Marlin 2.1.x (управление
-G-code по USB), приложение оператора — Python (pyserial + PySide6).
+Позиционирующий стол томографа на базе **Arduino Mega 2560 + RAMPS 1.6 + Marlin 2.1.2**.
+Управление выполняется по USB через G-code из Python/PySide6-приложений.
 
-## Железо
+```text
+Python GUI → USB Serial → Marlin → STEP/DIR → A4988 / TB6600 → двигатели
+```
 
-| Узел | Описание |
-|---|---|
-| Плата | Arduino Mega 2560 + RAMPS 1.6 (BIGTREETECH) |
-| Шаговики | 5 × NEMA17 через A4988, микрошаг 1/16 (X, Y, Z + 2 поворотные оси) |
-| DC-мотор | 12 В, управление через MOSFET D9 (ШИМ, команда `M106 S0–255`) |
-| Концевики | частично установлены (раскладка уточняется) |
-| Питание | 12 В DC |
+## Аппаратная конфигурация
 
-## Документация по подключениям
+- Arduino Mega 2560;
+- RAMPS 1.6;
+- 5 драйверов A4988 на RAMPS;
+- внешний TB6600 для шестой оси C;
+- механические NO-концевики;
+- питание двигателей 12 V;
+- USB Serial, обычно `COM11`.
 
-- **[docs/index.html](docs/index.html)** — полный визуальный справочник в одном файле:
-  официальная диаграмма подключения BTT RAMPS 1.6, принципиальные схемы, карта шёлка,
-  шпаргалка пинов на русском (открывается в браузере без интернета).
-- [docs/ramps16_pinmap.md](docs/ramps16_pinmap.md) — таблицы «разъём → пин Mega» и команды проверки (`M119`, `M42`, `M280`).
-- `docs/pinout/` — исходные материалы:
+## Актуальная карта осей
 
-| Файл | Что это |
-|---|---|
-| `btt_ramps16_wiring_diagram.jpg` | Официальная диаграмма подключения RAMPS 1.6 (BIGTREETECH) |
-| `btt_schematic.pdf` / `btt_schematic_plus.pdf` | Принципиальные схемы платы |
-| `btt_silkscreen_2d.pdf` | 2D-карта шёлка (надписей) платы |
-| `rampswire14.svg` | Классическая схема RepRap (RAMPS 1.4 ≡ 1.6 электрически) |
-| `osoyoo_schematic2.png` | Схема подключения периферии |
-| `mega_connectors.png` / `ramps16_connectors.jpg` | Раскладка разъёмов Mega и RAMPS |
-| `btt_motherboard.jpg` | Фото платы BTT |
+| G-code | Подпись в GUI | Физическое назначение | Драйвер |
+|---|---|---|---|
+| `X` | X — precision (X) | точная X, микровинт | RAMPS X / A4988 |
+| `Y` | Y — precision (Y) | точная Y, микровинт | RAMPS Y / A4988 |
+| `Z` | XX — coarse (Z) | грубая X, направляющая около 1 м | RAMPS Z / A4988 |
+| `A` | Rotation (A) | вращение образца | RAMPS E1 / A4988 |
+| `B` | Tilt (B) | наклон | RAMPS E0 / A4988 |
+| `C` | Z — precision (C) | точная Z | внешний TB6600 |
 
-> 🌐 Онлайн-версия справочника (после включения GitHub Pages):
-> https://eugene-prokopev.github.io/TomoRamps/
+Порядок строк в GUI: `X, Y, C, A, B, Z`.
+
+### STEP / DIR / ENABLE
+
+| Ось | STEP | DIR | ENABLE |
+|---|---:|---:|---:|
+| X | D54 | D55 | D38 |
+| Y | D60 | D61 | D56 |
+| Z / coarse X | D46 | D48 | D62 |
+| B / E0 | D26 | D28 | D24 |
+| A / E1 | D36 | D34 | D30 |
+| C / TB6600 | D40 | D42 | D44 |
+
+Для C:
+
+```text
+Mega D40 → TB6600 PUL/STEP
+Mega D42 → TB6600 DIR
+Mega D44 → TB6600 ENA
+Mega GND ↔ TB6600 GND
+Мотор → TB6600 A+/A-/B+/B-
+```
+
+### Концевики
+
+Используются механические NO-концевики:
+
+```text
+COM → GND / контакт '-'
+NO  → SIGNAL / контакт 'S'
+'+' → не подключать
+```
+
+| Физическая ось | G-code | MIN | MAX |
+|---|---|---:|---:|
+| точная X | X | D3 / X_MIN | D2 / X_MAX |
+| точная Y | Y | D14 / Y_MIN | D15 / Y_MAX |
+| грубая X | Z | D11 | D6 |
+| точная Z | C | D18 / Z_MIN | D19 / Z_MAX |
+| вращение | A | нет | нет |
+| наклон | B | нет | нет |
+
+Ожидаемое состояние в `M119`:
+
+```text
+отпущен → open
+нажат   → TRIGGERED
+```
+
+Не запускать `G28 A` и `G28 B`: у этих осей нет концевиков.
+
+Подробная схема: [docs/axis_map.md](docs/axis_map.md).
+Визуальный справочник: [docs/index.html](docs/index.html).
+
+## Приложения
+
+### Русская версия с калибровкой
+
+```powershell
+.\.venv\Scripts\python.exe app\main_with_calibration.py
+```
+
+Включает:
+
+- jog и непрерывный jog короткими сегментами;
+- дробные расстояния и скорости;
+- поддержку точки и запятой (`0.25` и `0,25`);
+- координаты `M114`;
+- концевики `M119`;
+- консоль G-code;
+- serial-лог и crash-лог;
+- `M17`, `M18`, `M410`, `M112`, `G92`;
+- окно калибровки `steps/unit`;
+- чтение `M503`, применение `M92`, сохранение `M500`;
+- настройку runtime-параметров `M203/M201/M204/M205`.
+
+### English-версия без калибровки
+
+```powershell
+.\.venv\Scripts\python.exe app\main_english.py
+```
+
+Это отдельный английский jog-контроллер без вкладки калибровки. Остальные функции
+управления одинаковы с основной версией.
+
+### Базовая русская версия
+
+```powershell
+.\.venv\Scripts\python.exe app\main.py
+```
+
+Для повседневной работы рекомендуется `main_english.py` или
+`main_with_calibration.py`.
+
+## Безопасные команды
+
+Перед первым движением:
+
+```gcode
+M17
+M119
+M114
+```
+
+Движение выполняется относительной командой:
+
+```gcode
+G91
+G1 X0.25 F12.5
+G90
+```
+
+Остановка:
+
+```gcode
+M410  ; быстрый останов движения
+M112  ; аварийный останов Marlin
+```
+
+`M112` обычно требует перезапуска или сброса Marlin.
+
+## Homing и скорости
+
+Скорость поиска нуля `G28` задаётся в прошивке параметром
+`HOMING_FEEDRATE_MM_M` в `firmware/Marlin/Marlin/Configuration.h`.
+Текущая конфигурация репозитория:
+
+```cpp
+#define HOMING_FEEDRATE_MM_M { (50), (50), (50), (50), (50), (50) }
+```
+
+Значения задаются в единицах Marlin в минуту. Для изменения скорости `G28` нужно
+изменить `Configuration.h`, пересобрать и перепрошить Mega. Параметры `M203`, `M201`,
+`M204`, `M205` из вкладки калибровки меняют обычное движение и ограничения planner,
+но не заменяют compile-time скорость homing.
+
+## Marlin: сборка и прошивка
+
+Исходники находятся в:
+
+```text
+firmware/Marlin/Marlin/
+```
+
+Environment PlatformIO:
+
+```text
+mega2560
+```
+
+Сборка:
+
+```powershell
+cd C:\pythonProject\Tomo_Ramps_26.08.26
+.\.venv\Scripts\python.exe -m platformio run -d firmware\Marlin -e mega2560
+```
+
+Прошивка на `COM11`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\flash.ps1 COM11
+```
+
+Для изменения только `steps/unit` перепрошивка не нужна:
+
+```gcode
+M92 X<value>
+M500
+M503
+```
+
+EEPROM Marlin — основное хранилище рабочих параметров. Файл
+`config/calibration.json` используется как резервная копия и история калибровок.
+
+## Установка и тесты
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+$env:QT_QPA_PLATFORM = "offscreen"
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+Тесты используют mock Serial и не требуют подключённой платы.
+
+Проверка прошивки и тестов:
+
+```powershell
+python scripts/check.py
+```
 
 ## Структура репозитория
 
-```
-├── app/                 # GUI-приложение оператора (PySide6)
-├── src/tomostage/       # библиотека контроллера стола (pyserial, G-code)
-├── tests/               # pytest (serial мокается, железо не требуется)
-├── scripts/check.py     # автопроверка цели: компиляция+тесты одним запуском
-├── firmware/            # конфиги Marlin (Configuration.h и патчи)
-├── docs/
-│   ├── index.html         # визуальный справочник распиновки (GitHub Pages)
-│   ├── ramps16_pinmap.md  # распиновка RAMPS 1.6 ↔ Mega
-│   ├── pinout/            # схемы, диаграммы, фото платы
-│   └── goals/             # GOAL-*.md и VERDICT-*.md (режим «цель → ревью»)
-├── requirements.txt
-└── README.md
+```text
+app/
+  main.py                    базовый GUI
+  main_with_calibration.py   русский GUI с калибровкой
+  main_english.py            английский GUI без калибровки
+  calibration_window.py      окно калибровки
+src/tomostage/
+  controller.py              G-code/Serial-контроллер
+tests/                       pytest и mock Serial
+firmware/Marlin/Marlin/     исходники и Configuration.h
+docs/axis_map.md             актуальная распиновка и концевики
+docs/calibration.md          workflow калибровки
+config/calibration.json      резервная копия калибровок
+logs/                        serial.log и crash.log
 ```
 
-## Быстрый старт (Windows)
+## Git workflow
+
+Изменения делаются небольшими коммитами. Перед коммитом необходимо выполнить:
 
 ```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-pytest -q
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m py_compile app\main.py app\main_with_calibration.py app\main_english.py
 ```
 
-## Правила работы (workflow)
-
-1. Цель формулируется в `docs/goals/GOAL-XXX.md` с измеримыми критериями приёмки.
-2. Изменения — маленькими атомарными коммитами.
-3. Перед завершением: `python scripts/check.py` (тесты + сборка прошивки).
-4. Ревью отдельным ассистентом по diff и логам тестов → `VERDICT-XXX.md`.
-5. Рабочие состояния помечаются тегами: `git tag g001-ok`.
-
-## Статус
-
-- [x] Каркас репозитория, документация
-- [x] Раскладка осей: [docs/axis_map.md](docs/axis_map.md) (X/Y точные, Z грубая 1 м, I наклон, J вращение)
-- [x] Библиотека `tomostage` (G-code клиент) — 10 тестов зелёные
-- [x] Тестовый пульт `app/main.py` (PySide6): jog 5 осей, DC-мотор, E-STOP
-- [ ] Конфиг Marlin под 5 осей + концевики (G-002, PlatformIO)
-- [ ] DC-мотор через L298N (D9/D11/D6) + энкодер точной оси Z
-- [ ] Интеграция с железом (smoke: `python scripts/smoke_serial.py --port COMx`)
+Аппаратные изменения и новую прошивку проверять на одной оси за раз, с рукой рядом
+с `M410`.
