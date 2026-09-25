@@ -46,6 +46,9 @@ class FakeSerial:
         if cmd.startswith("M119"):
             return ["Reporting endstop status", "x_min: TRIGGERED", "x_max: open",
                     "y_min: open", "y_max: open", "z_min: open", "z_max: open", "ok"]
+        if cmd.startswith("M503"):
+            return ["echo:; Steps per unit:",
+                    "echo:  M92 X80.00 Y80.00 Z80.00 A80.00 B80.00 C80.00", "ok"]
         if cmd.startswith("G28"):
             return ["ok"]
         if cmd.startswith("G0") or cmd.startswith("G1"):
@@ -112,6 +115,12 @@ def test_endstops_and_firmware():
     with make_ctrl() as c:
         assert any("TRIGGERED" in s for s in c.endstops())
         assert "Marlin" in c.firmware_info()
+
+
+def test_m503_returns_echo_lines_for_calibration():
+    with make_ctrl() as c:
+        response = c.send("M503")
+    assert any("M92 X80.00" in line for line in response)
 
 
 def test_error_from_board_raises():

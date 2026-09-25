@@ -115,10 +115,14 @@ class GCodeController:
                     if line == "ok":
                         return info
                     continue
-                if line.startswith("Error:") or line.startswith("echo:"):
-                    if line.startswith("Error:"):
-                        info.append(line)
-                        raise TomoStageError(f"Плата: {line}")
+                if line.startswith("Error:"):
+                    info.append(line)
+                    raise TomoStageError(f"Плата: {line}")
+                # Marlin печатает результат M503 в строках "echo: ...".
+                # Их нужно вернуть вызывающему коду: калибратор извлекает
+                # из них M92. Раньше echo только логировался и терялся.
+                if line.startswith("echo:"):
+                    info.append(line)
                     continue
                 info.append(line)
             raise TomoStageError(f"Таймаут ответа на '{command}'")

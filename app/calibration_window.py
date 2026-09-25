@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTabWidget,
     QTableWidget,
@@ -75,6 +76,76 @@ def parse_m503_steps(lines: list[str]) -> dict[str, float]:
             if axis in DISPLAY_AXES:
                 result[axis] = float(raw_value)
     return result
+
+
+def parse_m503_motion(lines: list[str]) -> dict[str, object]:
+    """Parse runtime motion settings printed by Marlin M503."""
+    text = "\n".join(str(line) for line in lines)
+
+    def axis_values(command: str) -> dict[str, float]:
+        match = re.search(rf"\b{command}\b(.*)$", text, flags=re.IGNORECASE | re.MULTILINE)
+        if not match:
+            return {}
+        return {
+            axis.upper(): float(value)
+            for axis, value in re.findall(
+                r"(?<![A-Z])([XYZABC])\s*(-?(?:\d+(?:\.\d*)?|\.\d+))",
+                match.group(1),
+                flags=re.IGNORECASE,
+            )
+        }
+
+    result: dict[str, object] = {
+        "max_feedrate": axis_values("M203"),
+        "max_acceleration": axis_values("M201"),
+    }
+    for command, key in (("M204", "acceleration"), ("M205", "junction_deviation")):
+        match = re.search(rf"\b{command}\b(.*)$", text, flags=re.IGNORECASE | re.MULTILINE)
+        if not match:
+            continue
+        tail = match.group(1)
+        if command == "M204":
+            for letter, name in (("P", "acceleration"), ("T", "travel_acceleration")):
+                value = re.search(rf"\b{letter}\s*(-?(?:\d+(?:\.\d*)?|\.\d+))", tail, re.I)
+                if value:
+                    result[name] = float(value.group(1))
+        else:
+            value = re.search(r"\bJ\s*(-?(?:\d+(?:\.\d*)?|\.\d+))", tail, re.I)
+            if value:
+                result[key] = float(value.group(1))
+    return result
+
+
+def parse_endstops(lines: list[str]) -> dict[tuple[str, str], bool]:
+    """Parse Marlin M119 output into ``(axis, side) -> triggered``.
+
+    Supports normal lines and Marlin's ``echo:`` prefix. Unknown labels are
+    ignored so additional endstops in firmware do not break calibration.
+    """
+    result: dict[tuple[str, str], bool] = {}
+    pattern = re.compile(
+        r"(?:^|\s)([XYZC])_(MIN|MAX)\s*:\s*(TRIGGERED|OPEN)\b",
+        flags=re.IGNORECASE,
+    )
+    for raw_line in lines:
+        line = str(raw_line).strip()
+        for raw_axis, raw_side, raw_state in pattern.findall(line):
+            result[(raw_axis.upper(), raw_side.lower())] = raw_state.upper() == "TRIGGERED"
+    return result
+
+
+def calculate_new_steps(old: float, commanded: float, measured: float) -> float:
+    """Calculate corrected steps/unit from a measured move."""
+    if old <= 0 or commanded <= 0 or measured <= 0:
+        raise ValueError("old, commanded и measured должны быть больше нуля")
+    return old * commanded / measured
+
+
+def relative_error_percent(commanded: float, measured: float) -> float:
+    """Return signed measurement error relative to commanded distance."""
+    if commanded <= 0 or measured < 0:
+        raise ValueError("commanded должен быть больше нуля, measured — неотрицательным")
+    return (measured - commanded) / commanded * 100.0
 
 
 class StageWorker(QThread):
@@ -141,6 +212,7 @@ class CalibrationWindow(QDialog):
         self.tabs.addTab(self._build_scale_tab(), "1. Масштаб")
         self.tabs.addTab(self._build_backlash_tab(), "2. Люфт")
         self.tabs.addTab(self._build_repeatability_tab(), "3. Повторяемость")
+        self.tabs.addTab(self._build_motion_tab(), "4. Скорости и ускорения")
         root.addWidget(self.tabs, 1)
 
         self.log = QTextEdit()
@@ -199,8 +271,10 @@ class CalibrationWindow(QDialog):
         return box
 
     def _build_scale_tab(self) -> QWidget:
-        tab = QWidget()
-        root = QVBoxLayout(tab)
+        # Вкладка содержит много элементов, поэтому прокручиваемая область
+        # нужна для небольших экранов и уменьшенного окна.
+        content = QWidget()
+        root = QVBoxLayout(content)
 
         test_box = QGroupBox("Калибровочный ход")
         form = QFormLayout(test_box)
@@ -283,7 +357,112 @@ class CalibrationWindow(QDialog):
 
         root.addWidget(verify_box)
         root.addStretch()
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setWidget(content)
+        return scroll
+
+    def _build_motion_tab(self) -> QWidget:
+        tab = QWidget()
+        root = QVBoxLayout(tab)
+        info = QLabel(
+            "Эти параметры меняются без перепрошивки через M203/M201/M204/M205 и могут "
+            "сохраняться командой M500. Они ограничивают обычные перемещения. "
+            "Скорость поиска нуля G28 задаётся HOMING_FEEDRATE_MM_M в прошивке и "
+            "этими полями не изменяется."
+        )
+        info.setWordWrap(True)
+        root.addWidget(info)
+
+        self.motion_feed_fields: dict[str, QDoubleSpinBox] = {}
+        self.motion_accel_fields: dict[str, QDoubleSpinBox] = {}
+        axes_box = QGroupBox("Максимальная скорость M203 (единиц/с)")
+        axes_grid = QGridLayout(axes_box)
+        for column, axis in enumerate(DISPLAY_AXES):
+            axes_grid.addWidget(QLabel(axis), 0, column)
+            spin = QDoubleSpinBox()
+            spin.setRange(0.01, 10000.0)
+            spin.setDecimals(2)
+            spin.setValue(100.0)
+            self.motion_feed_fields[axis] = spin
+            axes_grid.addWidget(spin, 1, column)
+        root.addWidget(axes_box)
+
+        accel_box = QGroupBox("Максимальное ускорение M201 (единиц/с²)")
+        accel_grid = QGridLayout(accel_box)
+        for column, axis in enumerate(DISPLAY_AXES):
+            accel_grid.addWidget(QLabel(axis), 0, column)
+            spin = QDoubleSpinBox()
+            spin.setRange(0.01, 100000.0)
+            spin.setDecimals(2)
+            spin.setValue(500.0)
+            self.motion_accel_fields[axis] = spin
+            accel_grid.addWidget(spin, 1, column)
+        root.addWidget(accel_box)
+
+        form = QFormLayout()
+        self.motion_accel = QDoubleSpinBox()
+        self.motion_accel.setRange(0.01, 100000.0)
+        self.motion_accel.setDecimals(2)
+        self.motion_accel.setValue(800.0)
+        form.addRow("Ускорение перемещения P (M204):", self.motion_accel)
+        self.motion_travel_accel = QDoubleSpinBox()
+        self.motion_travel_accel.setRange(0.01, 100000.0)
+        self.motion_travel_accel.setDecimals(2)
+        self.motion_travel_accel.setValue(800.0)
+        form.addRow("Ускорение холостого хода T (M204):", self.motion_travel_accel)
+        self.motion_junction = QDoubleSpinBox()
+        self.motion_junction.setRange(0.0, 10.0)
+        self.motion_junction.setDecimals(5)
+        self.motion_junction.setValue(0.01)
+        form.addRow("Junction deviation J (M205):", self.motion_junction)
+        root.addLayout(form)
+
+        buttons = QHBoxLayout()
+        read = QPushButton("Прочитать M503")
+        read.clicked.connect(self.read_m503)
+        buttons.addWidget(read)
+        apply_btn = QPushButton("Применить параметры")
+        apply_btn.clicked.connect(self.apply_motion_settings)
+        buttons.addWidget(apply_btn)
+        save_btn = QPushButton("Применить и сохранить M500")
+        save_btn.clicked.connect(lambda: self.apply_motion_settings(save=True))
+        buttons.addWidget(save_btn)
+        root.addLayout(buttons)
+        root.addStretch()
         return tab
+
+    def _set_motion_fields(self, values: dict[str, object]) -> None:
+        for axis, value in dict(values.get("max_feedrate", {})).items():
+            if axis in self.motion_feed_fields:
+                self.motion_feed_fields[axis].setValue(float(value))
+        for axis, value in dict(values.get("max_acceleration", {})).items():
+            if axis in self.motion_accel_fields:
+                self.motion_accel_fields[axis].setValue(float(value))
+        if "acceleration" in values:
+            self.motion_accel.setValue(float(values["acceleration"]))
+        if "travel_acceleration" in values:
+            self.motion_travel_accel.setValue(float(values["travel_acceleration"]))
+        if "junction_deviation" in values:
+            self.motion_junction.setValue(float(values["junction_deviation"]))
+
+    def apply_motion_settings(self, save: bool = False) -> None:
+        feed = "M203 " + " ".join(f"{a}{self.motion_feed_fields[a].value():g}" for a in DISPLAY_AXES)
+        accel = "M201 " + " ".join(f"{a}{self.motion_accel_fields[a].value():g}" for a in DISPLAY_AXES)
+        m204 = f"M204 P{self.motion_accel.value():g} T{self.motion_travel_accel.value():g}"
+        m205 = f"M205 J{self.motion_junction.value():g}"
+        commands = [feed, accel, m204, m205] + (["M500"] if save else [])
+
+        def fn():
+            result = []
+            for command in commands:
+                result.extend(self.stage.send(command, timeout_seconds=15.0))
+            return result
+
+        self._run("; ".join(commands), fn)
 
     def _build_backlash_tab(self) -> QWidget:
         tab = QWidget()
@@ -450,7 +629,11 @@ class CalibrationWindow(QDialog):
                 QMessageBox.warning(self, "M503", "Не удалось найти steps/unit в ответе M503.")
                 return
             self.steps_from_marlin.update(parsed)
+            motion = parse_m503_motion(lines)
+            self._set_motion_fields(motion)
             self._append("< M92: " + ", ".join(f"{a}={v:g}" for a, v in parsed.items()))
+            if motion.get("max_feedrate"):
+                self._append("< M203/M201/M204/M205: параметры движения прочитаны")
             self._axis_changed(self.axis_combo.currentText())
 
         self._run("M503 — прочитать текущие steps/unit", fn, done)
